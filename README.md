@@ -11,7 +11,7 @@ each spec has its own document in `docs/specs/`.
 |---|---|
 | S2 Foundation | Built: [docs/specs/S2-foundation.md](docs/specs/S2-foundation.md) |
 | S3 Ops Lead | Built: [docs/specs/S3-ops-lead.md](docs/specs/S3-ops-lead.md) |
-| S4 Wholesaler Interface | Blocked on D10 (wholesaler conversation) |
+| S4 Wholesaler Interface | Draft: [docs/specs/S4-wholesaler-interface.md](docs/specs/S4-wholesaler-interface.md); blocked on D10 |
 
 ## Stack
 
