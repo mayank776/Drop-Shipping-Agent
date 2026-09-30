@@ -10,7 +10,8 @@ each spec has its own document in `docs/specs/`.
 | Spec | State |
 |---|---|
 | S2 Foundation | Built: [docs/specs/S2-foundation.md](docs/specs/S2-foundation.md) |
-| S3 Ops Lead | Next |
+| S3 Ops Lead | Built: [docs/specs/S3-ops-lead.md](docs/specs/S3-ops-lead.md) |
+| S4 Wholesaler Interface | Blocked on D10 (wholesaler conversation) |
 
 ## Stack
 
@@ -25,6 +26,7 @@ dropship/            application package
   api.py             FastAPI app (Telegram webhook, health)
   worker.py          Temporal worker
   approvals.py       approval workflow and activities
+  ops_lead/          S3: daily brief, daily plan, alert routing, brief schedule
   llm/               LLM client with fallback, and the shared output validator
   telegram/          Bot API client and webhook
   audit.py knowledge.py cache.py db.py models.py config.py telemetry.py temporal.py

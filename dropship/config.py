@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,7 +32,17 @@ class Settings(BaseSettings):
     ollama_base_url: str | None = None
     ollama_model: str | None = None
 
+    daily_brief_time: str = "09:00"  # HH:MM, Asia/Kolkata
+
     service_name: str = "dropship"
+
+    @field_validator("daily_brief_time")
+    @classmethod
+    def _check_brief_time(cls, value: str) -> str:
+        from .ops_lead.schedule import parse_brief_time
+
+        parse_brief_time(value)
+        return value
 
 
 @lru_cache(maxsize=1)

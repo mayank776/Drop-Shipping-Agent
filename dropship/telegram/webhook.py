@@ -5,16 +5,21 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 
 from ..approvals import ApprovalWorkflow, DecisionSignal, parse_callback_data, workflow_id
 from ..cache import mark_seen, seen
+from ..ops_lead.brief import BriefInput, DailyBriefWorkflow, ist_today
+from ..ops_lead.plan import PlanStore, format_plan
 from .client import TelegramClient, TelegramError
 
 log = logging.getLogger(__name__)
@@ -29,6 +34,8 @@ class WebhookDeps:
     telegram: TelegramClient
     temporal: Client
     redis: Redis
+    sessions: async_sessionmaker
+    task_queue: str
 
 
 def make_router(get_deps) -> APIRouter:
@@ -55,7 +62,7 @@ def make_router(get_deps) -> APIRouter:
         if "callback_query" in update:
             await _on_callback(deps, update["callback_query"])
         elif "message" in update:
-            await _on_message(deps, update["message"])
+            await _on_message(deps, update["message"], update.get("update_id"))
         if "update_id" in update:
             await mark_seen(deps.redis, key)
         return Response(status_code=200)
@@ -70,11 +77,33 @@ def _is_owner(deps: WebhookDeps, chat: Any, sender: Any) -> bool:
     )
 
 
-async def _on_message(deps: WebhookDeps, message: dict) -> None:
+HELP = (
+    "Bot is online. Approval requests arrive with the daily brief.\n"
+    "/queue – send the approval queue now\n"
+    "/plan – today's plan"
+)
+
+
+async def _on_message(deps: WebhookDeps, message: dict, update_id: Any) -> None:
     if not _is_owner(deps, message.get("chat"), message.get("from")):
         log.warning("Ignoring message from a non-owner chat")
         return
-    await _safe(deps.telegram.send_message(deps.owner_chat_id, "Bot is online. Approval requests will appear here."))
+    words = (message.get("text") or "").split()
+    command = words[0].split("@")[0].lower() if words else ""  # "/queue@MyBot" → "/queue"
+    if command == "/queue":
+        try:
+            await deps.temporal.start_workflow(
+                DailyBriefWorkflow.run, BriefInput(manual=True), id=f"brief-manual-{update_id if update_id is not None else uuid.uuid4().hex}", task_queue=deps.task_queue
+            )
+        except WorkflowAlreadyStartedError:
+            pass  # same update delivered twice
+        await _safe(deps.telegram.send_message(deps.owner_chat_id, "Sending the queue now."))
+    elif command == "/plan":
+        plan = await PlanStore(deps.sessions).get(ist_today().date())
+        text = "No plan yet today; it's built with the daily brief." if plan is None else "Today's plan:\n" + format_plan(plan)
+        await _safe(deps.telegram.send_message(deps.owner_chat_id, text))
+    else:
+        await _safe(deps.telegram.send_message(deps.owner_chat_id, HELP))
 
 
 async def _on_callback(deps: WebhookDeps, query: dict) -> None:

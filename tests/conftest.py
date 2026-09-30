@@ -114,3 +114,28 @@ async def temporal_env():
         pytest.skip(f"Temporal dev server not available: {exc}")
     yield env
     await env.shutdown()
+
+
+@pytest.fixture
+async def clean_queue(sessions):
+    """The brief looks at every pending approval and alert, so start those tables empty."""
+    async with sessions() as session, session.begin():
+        for table in ("approvals", "alerts", "daily_plans"):
+            await session.execute(text(f"DELETE FROM {table}"))
+
+
+@pytest.fixture
+async def stack(temporal_env, sessions, telegram, redis, clean_queue):
+    """A running worker plus the FastAPI app wired to it. Yields (task_queue, http client)."""
+    import uuid
+
+    from dropship.api import create_app
+    from dropship.telegram.webhook import WebhookDeps
+    from dropship.worker import build_worker
+
+    queue = f"test-{uuid.uuid4().hex[:8]}"
+    worker = build_worker(temporal_env.client, queue, sessions, telegram, redis, OWNER)
+    deps = WebhookDeps(SECRET, OWNER, telegram, temporal_env.client, redis, sessions, queue)
+    async with worker:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(deps)), base_url="http://test") as http:
+            yield queue, http

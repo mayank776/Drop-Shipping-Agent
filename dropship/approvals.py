@@ -1,8 +1,9 @@
-"""Approvals as Temporal workflows (D3, D13, D14, D17, D21).
+"""Approvals as Temporal workflows (D3, D13, D14, D16, D17, D21).
 
-``ApprovalWorkflow`` stores the request, sends it to Mayank on Telegram with Approve/Reject
-buttons, waits for the ``decide`` signal, records the first decision (later ones are ignored),
-audits it and edits the message to show the outcome.
+``ApprovalWorkflow`` stores the request and waits in the queue until the daily brief sends the
+``release`` signal (urgent requests skip the queue). It then sends the request to Mayank on
+Telegram with Approve/Reject buttons, waits for the ``decide`` signal, records the first decision
+(later ones are ignored), audits it and edits the message to show the outcome.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from sqlalchemy import update
+    from sqlalchemy import func, update
     from sqlalchemy.dialects.postgresql import insert
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -24,6 +25,8 @@ with workflow.unsafe.imports_passed_through():
     from .telegram.client import TelegramClient
 
 KINDS = ("price_change", "product_change", "refund", "discount", "ad_spend", "payment", "resume")
+# Kinds that lose their meaning if held until the next brief (D22b's 12-hour veto window).
+URGENT_KINDS = ("resume",)
 CALLBACK_PREFIX = "ap"
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -54,10 +57,13 @@ class ApprovalRequest:
     title: str
     requested_by: str
     lines: list[str] = field(default_factory=list)
+    urgent: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
             raise ValueError(f"unknown approval kind {self.kind!r}")
+        if self.kind in URGENT_KINDS:
+            self.urgent = True
 
 
 @dataclass
@@ -107,6 +113,7 @@ class ApprovalActivities:
                     title=request.title,
                     lines=request.lines,
                     requested_by=request.requested_by,
+                    urgent=request.urgent,
                 )
                 .on_conflict_do_nothing()
                 .returning(Approval.id)
@@ -130,7 +137,9 @@ class ApprovalActivities:
         )
         async with self._sessions() as session, session.begin():
             await session.execute(
-                update(Approval).where(Approval.id == request.approval_id).values(telegram_message_id=message_id)
+                update(Approval)
+                .where(Approval.id == request.approval_id)
+                .values(telegram_message_id=message_id, released_at=func.now())
             )
 
     @activity.defn(name="approval.record")
@@ -171,11 +180,14 @@ _TIMEOUT = timedelta(seconds=30)
 class ApprovalWorkflow:
     def __init__(self) -> None:
         self._decision: DecisionSignal | None = None
+        self._released = False
 
     @workflow.run
     async def run(self, request: ApprovalRequest) -> ApprovalResult:
         opts = {"start_to_close_timeout": _TIMEOUT, "retry_policy": _RETRY}
         await workflow.execute_activity("approval.create", request, **opts)
+        if not request.urgent:
+            await workflow.wait_condition(lambda: self._released)
         await workflow.execute_activity("approval.send", request, **opts)
 
         await workflow.wait_condition(lambda: self._decision is not None)
@@ -192,6 +204,10 @@ class ApprovalWorkflow:
         return result
 
     @workflow.signal
+    def release(self) -> None:
+        self._released = True
+
+    @workflow.signal
     def decide(self, decision: DecisionSignal) -> None:
         if self._decision is None:  # first decision wins
             self._decision = decision
@@ -201,3 +217,19 @@ class ApprovalWorkflow:
         if self._decision is None:
             return "pending"
         return "approved" if self._decision.approved else "rejected"
+
+
+async def request_approval(
+    client,
+    task_queue: str,
+    kind: str,
+    title: str,
+    requested_by: str,
+    lines: list[str] | None = None,
+    urgent: bool = False,
+):
+    """Queue an approval for Mayank; returns the workflow handle (``await handle.result()``)."""
+    request = ApprovalRequest(new_approval_id(), kind, title, requested_by, lines or [], urgent)
+    return await client.start_workflow(
+        ApprovalWorkflow.run, request, id=workflow_id(request.approval_id), task_queue=task_queue
+    )
