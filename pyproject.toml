@@ -1,0 +1,39 @@
+[project]
+name = "dropship"
+version = "0.1.0"
+description = "AI-run Amazon India store: agent team foundation"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.142,<1",
+    "uvicorn[standard]>=0.54,<1",
+    "temporalio>=1.33,<2",
+    "sqlalchemy[asyncio]>=2.1,<3",
+    "asyncpg>=0.31,<1",
+    "alembic>=1.20,<2",
+    "pgvector>=0.5,<1",
+    "redis>=8.1,<9",
+    "openai>=3.22,<4",
+    "langsmith>=0.14,<1",
+    "pydantic>=2.13,<3",
+    "pydantic-settings>=2.15,<3",
+    "httpx>=0.28,<1",
+    "opentelemetry-sdk>=1.45,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
+    "opentelemetry-instrumentation-fastapi>=0.66b0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10", "pytest-asyncio>=1.4,<2"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dropship*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
