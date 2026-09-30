@@ -6,6 +6,7 @@ skipped when those aren't available:
 - TEST_DATABASE_URL  default postgresql+asyncpg://dropship:dropship@127.0.0.1:5432/dropship_test
 - TEST_REDIS_URL     default redis://127.0.0.1:6379/15
 - TEMPORAL_CLI_PATH  path to a `temporal` binary; otherwise the SDK tries to download one
+- REQUIRE_SERVICES   set to 1 (as CI does) to fail instead of skip when a service is missing
 """
 
 import asyncio
@@ -28,6 +29,12 @@ TEST_DATABASE_URL = os.environ.get(
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 OWNER = 111222333
 SECRET = "test-secret"
+
+
+def unavailable(reason: str) -> None:
+    if os.environ.get("REQUIRE_SERVICES") == "1":
+        pytest.fail(reason, pytrace=False)
+    pytest.skip(reason)
 
 
 class FakeTelegramAPI:
@@ -73,7 +80,7 @@ async def engine():
             await conn.execute(text("CREATE SCHEMA public"))
     except (OSError, Exception) as exc:  # noqa: BLE001 - any connection failure means "no database"
         await engine.dispose()
-        pytest.skip(f"PostgreSQL not available: {exc}")
+        unavailable(f"PostgreSQL not available: {exc}")
     migrate = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "alembic", "upgrade", "head",
         env={**os.environ, "DATABASE_URL": TEST_DATABASE_URL},
@@ -99,7 +106,7 @@ async def redis():
     try:
         await client.flushdb()
     except (RedisConnectionError, OSError) as exc:
-        pytest.skip(f"Redis not available: {exc}")
+        unavailable(f"Redis not available: {exc}")
     yield client
     await client.aclose()
 
@@ -111,7 +118,7 @@ async def temporal_env():
     try:
         env = await WorkflowEnvironment.start_local(dev_server_existing_path=os.environ.get("TEMPORAL_CLI_PATH"))
     except RuntimeError as exc:
-        pytest.skip(f"Temporal dev server not available: {exc}")
+        unavailable(f"Temporal dev server not available: {exc}")
     yield env
     await env.shutdown()
 

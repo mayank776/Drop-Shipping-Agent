@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: dropship
+          POSTGRES_PASSWORD: dropship
+          POSTGRES_DB: dropship_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dropship"
+          --health-interval 2s
+          --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-retries 30
+    env:
+      # Integration tests fail instead of skipping if a service is missing.
+      REQUIRE_SERVICES: "1"
+      TEST_DATABASE_URL: postgresql+asyncpg://dropship:dropship@127.0.0.1:5432/dropship_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # The Temporal SDK downloads its dev server on first use.
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t dropship:ci .
+      - name: Image imports the app and runs migrations tooling
+        run: |
+          docker run --rm dropship:ci python -c "import dropship.api, dropship.worker"
+          docker run --rm dropship:ci alembic --help > /dev/null
+      - name: Compose file is valid
+        run: cp .env.example .env && docker compose config --quiet
