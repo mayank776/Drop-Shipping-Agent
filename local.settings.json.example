@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "TELEGRAM_BOT_TOKEN": "<from @BotFather>",
+    "TELEGRAM_WEBHOOK_SECRET": "<random, A-Z a-z 0-9 _ ->",
+    "TELEGRAM_OWNER_CHAT_ID": "<your numeric chat id>",
+    "AZURE_OPENAI_ENDPOINT": "https://<resource>.openai.azure.com",
+    "AZURE_OPENAI_DEPLOYMENT": "<deployment name>",
+    "AZURE_OPENAI_API_KEY": ""
+  }
+}
